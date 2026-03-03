@@ -3,47 +3,86 @@
 import React, { useState } from 'react';
 import { ChevronLeft, User, Mail, GraduationCap, CreditCard, Barcode, QrCode, ArrowRight } from 'lucide-react';
 import Link from 'next/link';
+// Aqui nós importamos a sua conexão com o banco!
+import { supabase } from '@/lib/supabase';
 
 export default function CadastroPagamento() {
   const [metodoSelecionado, setMetodoSelecionado] = useState('cartao');
   const [isProcessando, setIsProcessando] = useState(false);
   
-  // Estado para guardar os dados que o usuário digitar
   const [formData, setFormData] = useState({
     nome: '',
     email: '',
     instituicao: ''
   });
 
-  const handleConfirmarPagamento = () => {
-    // Verificação simples para ver se o usuário preencheu os campos
+  const handleConfirmarPagamento = async () => {
     if (!formData.nome || !formData.email || !formData.instituicao) {
       alert("Por favor, preencha todos os seus dados antes de confirmar!");
       return;
     }
 
     setIsProcessando(true);
-    // Simula um tempo de carregamento de 2 segundos para a apresentação
-    setTimeout(() => {
+
+    try {
+      // 1. Pega o ID do evento que a gente cadastrou no painel (Caminho Feliz da apresentação)
+      const { data: evento, error: erroEvento } = await supabase
+        .from('eventos')
+        .select('id')
+        .limit(1)
+        .single();
+
+      if (erroEvento || !evento) throw new Error("Nenhum evento encontrado no banco.");
+
+      // 2. Salva o Usuário no banco
+      // Usamos upsert para o sistema não quebrar se você testar duas vezes com o mesmo e-mail na apresentação
+      const { data: usuario, error: erroUsuario } = await supabase
+        .from('usuarios')
+        .upsert(
+          { nome: formData.nome, email: formData.email, instituicao: formData.instituicao, senha: '123' },
+          { onConflict: 'email' }
+        )
+        .select()
+        .single();
+
+      if (erroUsuario || !usuario) throw new Error("Erro ao salvar os dados do usuário.");
+
+      // 3. Salva a Inscrição conectando o Usuário e o Evento!
+      const { error: erroInscricao } = await supabase
+        .from('inscricoes')
+        .insert({
+          evento_id: evento.id,
+          usuario_id: usuario.id,
+          metodo_pagamento: metodoSelecionado,
+          status_pagamento: 'confirmado'
+        });
+
+      if (erroInscricao) throw new Error("Erro ao registrar a inscrição.");
+
+      // Se tudo deu certo, comemora e limpa a tela!
+      alert(`Sucesso! A inscrição de ${formData.nome} foi salva no banco de dados! 🎉`);
+      setFormData({ nome: '', email: '', instituicao: '' });
+
+    } catch (error: any) {
+      console.error(error);
+      alert("Ops! Algo deu errado: " + error.message);
+    } finally {
       setIsProcessando(false);
-      alert(`Inscrição de ${formData.nome} confirmada com sucesso!`);
-    }, 2000);
+    }
   };
 
   return (
     <div className="min-h-screen bg-[#0B1120] text-white p-5 pb-24 flex flex-col items-center">
-      {/* Container limitador para ficar bonito no Desktop */}
       <div className="w-full max-w-2xl">
         
-        {/* Header */}
         <div className="flex items-center mb-8 w-full">
-          <Link href="/eventos" className="p-2 -ml-2 hover:bg-slate-800 rounded-full transition-colors">
+          {/* Lembre-se de checar se o link de voltar está apontando para a pasta certa da sua tela de detalhes */}
+          <Link href="/detalhes-evento" className="p-2 -ml-2 hover:bg-slate-800 rounded-full transition-colors">
             <ChevronLeft size={24} className="text-blue-500" />
           </Link>
           <h1 className="text-xl font-bold mx-auto pr-8">Cadastro e Pagamento</h1>
         </div>
 
-        {/* Barra de Progresso */}
         <div className="mb-8 w-full">
           <div className="flex justify-between text-sm mb-2">
             <span className="text-slate-300">Passo 3 de 3: Finalização</span>
@@ -54,13 +93,11 @@ export default function CadastroPagamento() {
           </div>
         </div>
 
-        {/* Formulário de Dados do Usuário */}
         <div className="w-full">
           <h2 className="text-lg font-bold mb-1">Seus Dados ✨</h2>
           <p className="text-sm text-slate-400 mb-4">Preencha suas informações para o certificado e futuros eventos.</p>
           
           <div className="space-y-4 mb-10">
-            {/* Campo Nome */}
             <div className="flex items-center p-3 bg-[#0F172A] rounded-xl border border-slate-700 focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500 transition-all">
               <div className="bg-indigo-500/20 p-3 rounded-full mr-4"><User className="text-indigo-400" size={20} /></div>
               <div className="flex-1">
@@ -75,7 +112,6 @@ export default function CadastroPagamento() {
               </div>
             </div>
             
-            {/* Campo E-mail */}
             <div className="flex items-center p-3 bg-[#0F172A] rounded-xl border border-slate-700 focus-within:border-pink-500 focus-within:ring-1 focus-within:ring-pink-500 transition-all">
               <div className="bg-pink-500/20 p-3 rounded-full mr-4"><Mail className="text-pink-400" size={20} /></div>
               <div className="flex-1">
@@ -90,7 +126,6 @@ export default function CadastroPagamento() {
               </div>
             </div>
 
-            {/* Campo Instituição */}
             <div className="flex items-center p-3 bg-[#0F172A] rounded-xl border border-slate-700 focus-within:border-emerald-500 focus-within:ring-1 focus-within:ring-emerald-500 transition-all">
               <div className="bg-emerald-500/20 p-3 rounded-full mr-4"><GraduationCap className="text-emerald-400" size={20} /></div>
               <div className="flex-1">
@@ -107,13 +142,11 @@ export default function CadastroPagamento() {
           </div>
         </div>
 
-        {/* Métodos de Pagamento */}
         <div className="w-full">
           <h2 className="text-lg font-bold mb-1">Métodos de Pagamento</h2>
           <p className="text-sm text-slate-400 mb-4">Selecione como deseja pagar</p>
           
           <div className="space-y-3 mb-8">
-            {/* Cartão de Crédito */}
             <div 
               onClick={() => setMetodoSelecionado('cartao')}
               className={`flex items-center p-4 rounded-xl border cursor-pointer transition-all ${metodoSelecionado === 'cartao' ? 'bg-[#1E293B] border-blue-500' : 'bg-[#0F172A] border-slate-800 hover:bg-[#151f33]'}`}
@@ -129,7 +162,6 @@ export default function CadastroPagamento() {
               }
             </div>
 
-            {/* Boleto */}
             <div 
               onClick={() => setMetodoSelecionado('boleto')}
               className={`flex items-center p-4 rounded-xl border cursor-pointer transition-all ${metodoSelecionado === 'boleto' ? 'bg-[#1E293B] border-blue-500' : 'bg-[#0F172A] border-slate-800 hover:bg-[#151f33]'}`}
@@ -145,7 +177,6 @@ export default function CadastroPagamento() {
               }
             </div>
 
-            {/* Pix */}
             <div 
               onClick={() => setMetodoSelecionado('pix')}
               className={`flex items-center p-4 rounded-xl border cursor-pointer transition-all ${metodoSelecionado === 'pix' ? 'bg-[#1E293B] border-blue-500' : 'bg-[#0F172A] border-slate-800 hover:bg-[#151f33]'}`}
@@ -162,7 +193,6 @@ export default function CadastroPagamento() {
             </div>
           </div>
 
-          {/* Resumo de Valor */}
           <div className="flex justify-between items-end mb-10 pt-4 border-t border-slate-800">
             <div>
               <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">Valor Total</p>
@@ -176,7 +206,6 @@ export default function CadastroPagamento() {
         </div>
       </div>
 
-      {/* Botão Fixo de Confirmação no Rodapé */}
       <div className="fixed bottom-0 left-0 right-0 bg-[#0B1120] p-4 border-t border-slate-800 flex justify-center">
         <div className="w-full max-w-2xl">
           <p className="text-center text-[10px] text-slate-500 mb-3 flex items-center justify-center">
@@ -193,7 +222,7 @@ export default function CadastroPagamento() {
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
-                Processando...
+                Processando Inscrição...
               </span>
             ) : (
               <span className="flex items-center">

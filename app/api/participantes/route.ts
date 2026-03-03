@@ -1,37 +1,31 @@
 import { NextResponse } from 'next/server';
+import { supabase } from '@/lib/supabase';
 
-/**
- * Interface defining the expected data structure for an event participant.
- * This contract should be aligned with the future database schema.
- */
-interface Participant {
-  id: string;
-  name: string;
-  email: string;
-  avatarUrl: string;
-  paymentStatus: 'PAGO' | 'PENDENTE';
-  isCheckedIn: boolean;
-}
-
-/**
- * Handles HTTP GET requests to retrieve the dynamic list of participants.
- * Currently returns an empty array, acting as a placeholder until the database integration is finalized.
- * * @returns {NextResponse} JSON response containing the participant array.
- */
 export async function GET() {
   try {
-    // TODO: Implement the actual database query here in the future.
-    // Example using an ORM: const participants = await prisma.participant.findMany();
-    
-    const participants: Participant[] = []; // Starts empty, awaiting real data
+    // Busca dados cruzados entre inscrições e usuários
+    const { data, error } = await supabase
+      .from('inscricoes')
+      .select(`
+        id,
+        status_pagamento,
+        usuarios ( id, nome, email )
+      `);
+
+    if (error) throw error;
+
+    // Formata para o padrão que a sua tela de Confirmados espera
+    const participants = data.map((item: any) => ({
+      id: item.usuarios.id,
+      name: item.usuarios.nome,
+      email: item.usuarios.email,
+      avatarUrl: `https://i.pravatar.cc/150?u=${item.usuarios.email}`,
+      paymentStatus: item.status_pagamento === 'confirmado' ? 'PAGO' : 'PENDENTE',
+      isCheckedIn: false 
+    }));
 
     return NextResponse.json(participants, { status: 200 });
   } catch (error) {
-    // Logs the error internally for debugging purposes without exposing sensitive data to the client.
-    console.error('Data fetching error:', error);
-    return NextResponse.json(
-      { success: false, message: 'Internal Server Error during data retrieval.' },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, message: 'Erro ao buscar dados.' }, { status: 500 });
   }
 }

@@ -1,38 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { supabase } from '@/lib/supabase';
 
-// Ó a mágica aqui: a gente tipa o request como NextRequest
 export async function POST(request: NextRequest) {
   try {
-    // O Next.js já pega os arquivos e textos direto do FormData
     const formData = await request.formData();
     
-    const titulo = formData.get('titulo');
-    const autores = formData.get('autores');
-    const resumo = formData.get('resumo');
-    const arquivo = formData.get('arquivo');
+    // Puxa o primeiro evento e usuário disponíveis para garantir o vínculo no banco
+    const { data: evento } = await supabase.from('eventos').select('id').limit(1).single();
+    const { data: usuario } = await supabase.from('usuarios').select('id').limit(1).single();
 
-    // Validação básica
-    if (!titulo || !autores || !resumo || !arquivo) {
-      console.warn("Submissão incompleta recebida.");
-      return NextResponse.json(
-        { sucesso: false, erro: 'Todos os campos são obrigatórios.' },
-        { status: 400 }
-      );
-    }
+    const { error } = await supabase
+      .from('submissoes')
+      .insert([{
+        titulo_trabalho: formData.get('titulo'),
+        arquivo_url: (formData.get('arquivo') as File)?.name || 'sem_arquivo.pdf',
+        evento_id: evento?.id,
+        usuario_id: usuario?.id,
+        status: 'em_analise'
+      }]);
 
-    console.log("Chegou na base, patrão!");
-    console.log("Dados da submissão:", { titulo, autores, resumo });
-    console.log("Arquivo recebido:", (arquivo as File).name || 'Arquivo sem nome');
+    if (error) throw error;
 
-    return NextResponse.json(
-      { sucesso: true, mensagem: 'Trabalho submetido com sucesso!' },
-      { status: 200 }
-    );
+    return NextResponse.json({ sucesso: true, mensagem: 'Trabalho gravado no banco!' });
   } catch (error) {
-    console.error("Erro na API de submissão:", error);
-    return NextResponse.json(
-      { sucesso: false, erro: 'Erro interno ao submeter o trabalho.' },
-      { status: 500 }
-    );
+    return NextResponse.json({ sucesso: false, erro: 'Erro na submissão.' }, { status: 500 });
   }
 }
