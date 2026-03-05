@@ -1,241 +1,184 @@
+
 'use client';
 
-import { useState } from 'react';
-import { Camera, Calendar, LayoutDashboard, PlusCircle, Award, Settings, ChevronDown } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { collection, query, orderBy, getDocs, where } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
+import { db, auth } from '@/lib/firebase';
+import { CalendarDays, MapPin, Clock, Search } from 'lucide-react';
+import BottomNav from '@/app/components/BottomNav';
+import { toast } from 'sonner';
 
-/**
- * Defines the available categories for event participants.
- */
-const PARTICIPANT_TYPES = ['Estudantes', 'Professores', 'Pesquisadores', 'Público Geral'];
+export default function EventosPage() {
+  const router = useRouter();
+  const [eventos, setEventos] = useState<any[]>([]);
+  const [participacoes, setParticipacoes] = useState<string[]>([]); 
+  const [busca, setBusca] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
 
-export default function CriarEvento() {
-  const [titulo, setTitulo] = useState('');
-  const [tipo, setTipo] = useState('');
-  const [descricao, setDescricao] = useState('');
-  const [dataInicio, setDataInicio] = useState('');
-  const [horaInicio, setHoraInicio] = useState('');
-  const [dataFim, setDataFim] = useState('');
-  const [horaFim, setHoraFim] = useState('');
-  const [selectedParticipants, setSelectedParticipants] = useState<string[]>(['Professores', 'Pesquisadores']);
-  const [isPaid, setIsPaid] = useState(false);
-  const [imageFile, setImageFile] = useState<File | null>(null);
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (user) => {
+      setUserId(user ? user.uid : null);
+    });
+    return () => unsub();
+  }, []);
 
-  /**
-   * Toggles the selection state of a specific participant category.
-   * * @param {string} type - The participant category identifier to be toggled.
-   */
-  const toggleParticipant = (type: string) => {
-    setSelectedParticipants((prev) =>
-      prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]
-    );
-  };
-
-  /**
-   * Handles the file input change event to securely capture the selected image.
-   * * @param {React.ChangeEvent<HTMLInputElement>} e - The input change event object.
-   */
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      setImageFile(e.target.files[0]);
-    }
-  };
-
-  /**
-   * Asynchronously submits the form data to the underlying API endpoint.
-   * Constructs a FormData object to handle both scalar properties and binary file data.
-   */
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    const formData = new FormData();
-    formData.append('titulo', titulo);
-    formData.append('tipo', tipo);
-    formData.append('descricao', descricao);
-    formData.append('dataInicio', dataInicio);
-    formData.append('horaInicio', horaInicio);
-    formData.append('dataFim', dataFim);
-    formData.append('horaFim', horaFim);
-    formData.append('participantes', JSON.stringify(selectedParticipants));
-    formData.append('eventoPago', String(isPaid));
-    
-    if (imageFile) {
-      formData.append('imagem', imageFile);
-    }
-
-    try {
-      const response = await fetch('/api/eventos', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (response.ok) {
-        alert('Evento publicado com sucesso!');
-      } else {
-        alert('Falha ao publicar evento.');
+  useEffect(() => {
+    const fetchEventos = async () => {
+      try {
+        const q = query(collection(db, 'eventos'), orderBy('dataInicio', 'desc'));
+        const snap = await getDocs(q);
+        const lista = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setEventos(lista);
+      } catch (error) {
+        console.error("Erro ao buscar eventos:", error);
+      } finally {
+        setLoading(false);
       }
-    } catch (error) {
-      console.error('Submission failed:', error);
-      alert('Erro de conexão com o servidor.');
-    }
+    };
+
+    fetchEventos();
+  }, []);
+
+  useEffect(() => {
+    const fetchParticipacoes = async () => {
+      if (!userId) {
+        setParticipacoes([]);
+        return;
+      }
+      try {
+        const q = query(collection(db, 'participacoes'), where('userId', '==', userId));
+        const snap = await getDocs(q);
+        const listaEventosParticipados = snap.docs.map(doc => doc.data().eventoId);
+        setParticipacoes(listaEventosParticipados);
+      } catch (error) {
+        console.error("Erro ao buscar participações:", error);
+      }
+    };
+
+    fetchParticipacoes();
+  }, [userId]);
+
+  const eventosFiltrados = eventos.filter(evento => 
+    evento.titulo?.toLowerCase().includes(busca.toLowerCase()) || 
+    evento.descricao?.toLowerCase().includes(busca.toLowerCase())
+  );
+
+  const isEncerrado = (evento: any) => {
+    if (evento.status === 'finalizado') return true;
+    if (!evento.dataFim) return false;
+    
+    const fimStr = evento.horaFim ? `${evento.dataFim}T${evento.horaFim}` : `${evento.dataFim}T23:59:59`;
+    const fimData = new Date(fimStr);
+    return new Date() > fimData;
   };
 
   return (
-    <div className="min-h-screen bg-[#0F172A] text-white flex flex-col items-center pb-24 relative font-sans">
-      <div className="w-full max-w-md px-5 pt-8">
+    <div className="min-h-screen bg-[#0F172A] text-white pb-24 font-sans">
+      <header className="p-8 pt-16 pb-8 bg-[#1E293B]/40 rounded-b-[2.5rem] border-b border-gray-800 shadow-xl">
+        <h1 className="text-3xl font-bold tracking-tight">Eventos Acadêmicos</h1>
+        <p className="text-gray-400 text-sm mt-2">Encontre e participe dos melhores eventos.</p>
         
-        {/* Top Header Navigation */}
-        <div className="flex items-center justify-between mb-6">
-          <button className="text-[#3B82F6] font-medium text-sm">Cancelar</button>
-          <h1 className="text-base font-bold">Criar Evento Acadêmico</h1>
-          <button onClick={handleSubmit} className="text-[#3B82F6] font-medium text-sm">Criar</button>
+        <div className="relative mt-6">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" size={20} />
+          <input 
+            type="text" 
+            placeholder="Buscar eventos..." 
+            className="w-full bg-[#0F172A] border border-gray-700 rounded-xl pl-12 pr-4 py-4 text-sm text-white focus:border-blue-500 outline-none transition-colors"
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+          />
         </div>
+      </header>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          
-          {/* Image Upload Area */}
-          <label className="flex flex-col items-center justify-center border border-slate-700 border-dashed rounded-xl p-8 bg-[#162032] hover:bg-slate-800 transition cursor-pointer">
-            <Camera size={32} className="text-[#3B82F6] mb-3" />
-            <span className="text-sm font-bold mb-1">Carregar Imagem do Evento</span>
-            <span className="text-slate-400 text-xs mb-4">Recomendado: 1200x630px (Máx 5MB)</span>
-            <div className="bg-[#1E2E4A] text-[#3B82F6] text-xs font-bold py-2 px-4 rounded-lg">
-              {imageFile ? imageFile.name : 'Selecionar Imagem'}
-            </div>
-            <input type="file" className="hidden" accept="image/*" onChange={handleImageChange} />
-          </label>
+      <main className="p-4 sm:p-6 w-full max-w-7xl mx-auto space-y-6">
+        <div className="relative w-full max-w-md mx-auto sm:max-w-full">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" size={20} />
+          <input 
+            type="text" 
+            placeholder="Buscar eventos..." 
+            className="w-full bg-[#0F172A] border border-gray-700 rounded-xl pl-12 pr-4 py-4 text-sm text-white focus:border-blue-500 outline-none transition-colors"
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+          />
+        </div>
+        {loading ? (
+          <div className="text-center text-gray-500 py-10">Carregando eventos...</div>
+        ) : eventosFiltrados.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {eventosFiltrados.map(evento => (
+              <div key={evento.id} className="bg-[#1E293B] border border-gray-700 rounded-2xl shadow-lg overflow-hidden group hover:border-blue-500/50 transition-colors flex flex-col">
+                {evento.imagem && (
+                  <div className="w-full h-48 overflow-hidden bg-[#0F172A] flex items-center justify-center">
+                    <img src={evento.imagem} alt={evento.titulo} className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-300" />
+                  </div>
+                )}
+                <div className="p-5 flex flex-col flex-1">
+                  <div className="flex justify-between items-start mb-3 gap-2">
+                    <h2 className="text-xl font-bold text-white leading-tight">{evento.titulo}</h2>
+                    <span className={`text-[10px] font-bold px-2 py-1 rounded-md uppercase shrink-0 ${isEncerrado(evento) ? 'bg-red-500/20 text-red-400' : 'bg-green-500/20 text-green-400'}`}>
+                      {isEncerrado(evento) ? 'Encerrado' : 'Aberto'}
+                    </span>
+                  </div>
+                  
+                  <p className="text-sm text-gray-400 mb-5 line-clamp-2 flex-1">{evento.descricao}</p>
+                  
+                  <div className="flex flex-col gap-2 text-xs text-gray-500 mb-5 shrink-0">
+                    <div className="flex items-center gap-2">
+                      <CalendarDays size={14} className="text-blue-400" />
+                      <span>
+                        {evento.dataInicio ? new Date(evento.dataInicio).toLocaleDateString() : 'Não definida'} 
+                        {evento.horaInicio ? ` às ${evento.horaInicio}` : ''}
+                      </span>
+                    </div>
+                    {(evento.dataFim || evento.horaFim) && (
+                      <div className="flex items-center gap-2">
+                        <Clock size={14} className="text-blue-400" />
+                        <span>
+                          Fim: {evento.dataFim ? new Date(evento.dataFim).toLocaleDateString() : 'Não definida'} 
+                          {evento.horaFim ? ` às ${evento.horaFim}` : ''}
+                        </span>
+                      </div>
+                    )}
+                  </div>
 
-          {/* Event Details Inputs */}
-          <div>
-            <label className="block text-sm font-bold mb-2">Título do Evento</label>
-            <input 
-              type="text" 
-              placeholder="ex: Congresso Anual de Neurociência"
-              className="w-full bg-[#162032] border border-slate-700 rounded-lg p-3 text-sm focus:outline-none focus:border-[#3B82F6] transition"
-              value={titulo} onChange={(e) => setTitulo(e.target.value)}
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-bold mb-2">Tipo de Evento</label>
-            <div className="relative">
-              <select 
-                className="w-full bg-[#162032] border border-slate-700 rounded-lg p-3 text-sm appearance-none focus:outline-none focus:border-[#3B82F6] transition"
-                value={tipo} onChange={(e) => setTipo(e.target.value)}
-              >
-                <option value="" disabled>Escolha o tipo</option>
-                <option value="simposio">Simpósio</option>
-                <option value="congresso">Congresso</option>
-                <option value="palestra">Palestra</option>
-              </select>
-              <ChevronDown size={18} className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 pointer-events-none" />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-bold mb-2">Descrição</label>
-            <textarea 
-              placeholder="Descreva a agenda, palestrantes e objetivos principais..."
-              className="w-full bg-[#162032] border border-slate-700 rounded-lg p-3 text-sm h-28 resize-none focus:outline-none focus:border-[#3B82F6] transition"
-              value={descricao} onChange={(e) => setDescricao(e.target.value)}
-            />
-          </div>
-
-          {/* Date and Time Grid */}
-          <div>
-            <label className="block text-xs font-bold tracking-wider text-slate-400 mb-3">DATA E HORA</label>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-bold mb-1">Início (Data)</label>
-                <input type="date" className="w-full bg-[#162032] border border-slate-700 rounded-lg p-3 text-sm focus:outline-none focus:border-[#3B82F6] text-slate-300" value={dataInicio} onChange={(e) => setDataInicio(e.target.value)} />
+                  {evento.creatorId === userId ? (
+                    <button 
+                      onClick={() => router.push(`/eventos/${evento.id}`)}
+                      className="w-full bg-gray-800 hover:bg-gray-700 mt-auto text-gray-400 font-semibold rounded-xl py-3 transition-colors shrink-0"
+                    >
+                      Gerenciar Evento
+                    </button>
+                  ) : participacoes.includes(evento.id) ? (
+                    <button 
+                      onClick={() => router.push(`/eventos/${evento.id}`)}
+                      className="w-full bg-green-600/20 hover:bg-green-600/30 text-green-400 border border-green-500/30 mt-auto font-semibold rounded-xl py-3 transition-colors shrink-0"
+                    >
+                      Acessar Evento
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={() => router.push(`/participar/${evento.id}`)}
+                      disabled={isEncerrado(evento)}
+                      className="w-full bg-blue-600 hover:bg-blue-500 mt-auto text-white font-semibold rounded-xl py-3 transition-colors disabled:bg-gray-800 disabled:text-gray-500 disabled:cursor-not-allowed shrink-0"
+                    >
+                      {isEncerrado(evento) ? 'Inscrições Encerradas' : 'Participar Agora'}
+                    </button>
+                  )}
+                </div>
               </div>
-              <div>
-                <label className="block text-xs font-bold mb-1">Início (Hora)</label>
-                <input type="time" className="w-full bg-[#162032] border border-slate-700 rounded-lg p-3 text-sm focus:outline-none focus:border-[#3B82F6] text-slate-300" value={horaInicio} onChange={(e) => setHoraInicio(e.target.value)} />
-              </div>
-              <div>
-                <label className="block text-xs font-bold mb-1">Fim (Data)</label>
-                <input type="date" className="w-full bg-[#162032] border border-slate-700 rounded-lg p-3 text-sm focus:outline-none focus:border-[#3B82F6] text-slate-300" value={dataFim} onChange={(e) => setDataFim(e.target.value)} />
-              </div>
-              <div>
-                <label className="block text-xs font-bold mb-1">Fim (Hora)</label>
-                <input type="time" className="w-full bg-[#162032] border border-slate-700 rounded-lg p-3 text-sm focus:outline-none focus:border-[#3B82F6] text-slate-300" value={horaFim} onChange={(e) => setHoraFim(e.target.value)} />
-              </div>
-            </div>
+            ))}
           </div>
-
-          {/* Participant Types Chips */}
-          <div>
-            <label className="block text-xs font-bold tracking-wider text-slate-400 mb-3">TIPOS DE PARTICIPANTES</label>
-            <div className="flex flex-wrap gap-2">
-              {PARTICIPANT_TYPES.map((ptype) => (
-                <button
-                  key={ptype}
-                  type="button"
-                  onClick={() => toggleParticipant(ptype)}
-                  className={`px-4 py-2 rounded-full text-sm font-medium transition ${
-                    selectedParticipants.includes(ptype) 
-                      ? 'bg-[#3B82F6] text-white' 
-                      : 'bg-[#162032] text-slate-300 border border-slate-700'
-                  }`}
-                >
-                  {ptype}
-                </button>
-              ))}
-            </div>
+        ) : (
+          <div className="text-center text-gray-500 py-10">
+            Nenhum evento encontrado.{!busca && ' Que tal criar um?'}
           </div>
+        )}
+      </main>
 
-          {/* Paid Event Toggle */}
-          <div className="bg-[#162032] border border-slate-700 rounded-xl p-4 flex items-center justify-between">
-            <div>
-              <h4 className="font-bold text-sm">Evento Pago</h4>
-              <p className="text-xs text-slate-400 mt-0.5">Ative para cobrar inscrições (Gratuito por padrão)</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setIsPaid(!isPaid)}
-              className={`w-12 h-7 rounded-full transition-colors relative flex items-center px-1 ${isPaid ? 'bg-[#3B82F6]' : 'bg-slate-600'}`}
-            >
-              <div className={`w-5 h-5 bg-white rounded-full shadow-md transform transition-transform duration-200 ${isPaid ? 'translate-x-5' : 'translate-x-0'}`} />
-            </button>
-          </div>
-
-          {/* Publish Button */}
-          <button type="submit" className="w-full bg-[#3B82F6] hover:bg-blue-600 text-white font-bold py-4 rounded-xl transition shadow-lg mt-2">
-            Publicar Evento Acadêmico
-          </button>
-          
-          <p className="text-center text-xs text-slate-500 mt-4 pb-6">
-            Ao publicar, você concorda com os Termos de Serviço da Plataforma Acadêmica.
-          </p>
-        </form>
-      </div>
-
-      {/* Bottom Navigation Bar */}
-      <div className="fixed bottom-0 w-full max-w-md bg-[#0F172A] border-t border-slate-800 flex justify-between items-center px-6 py-3 pb-safe">
-        <button className="flex flex-col items-center text-slate-500 hover:text-slate-300 transition">
-          <LayoutDashboard size={20} className="mb-1" />
-          <span className="text-[10px]">Dashboard</span>
-        </button>
-        <button className="flex flex-col items-center text-slate-500 hover:text-slate-300 transition">
-          <Calendar size={20} className="mb-1" />
-          <span className="text-[10px]">Eventos</span>
-        </button>
-        <button className="flex flex-col items-center text-[#3B82F6] transition -mt-4">
-          <div className="bg-[#0F172A] p-1 rounded-full">
-            <div className="bg-[#3B82F6] rounded-full p-2">
-              <PlusCircle size={24} color="white" />
-            </div>
-          </div>
-          <span className="text-[10px] mt-1">Criar</span>
-        </button>
-        <button className="flex flex-col items-center text-slate-500 hover:text-slate-300 transition">
-          <Award size={20} className="mb-1" />
-          <span className="text-[10px]">Certificados</span>
-        </button>
-        <button className="flex flex-col items-center text-slate-500 hover:text-slate-300 transition">
-          <Settings size={20} className="mb-1" />
-          <span className="text-[10px]">Ajustes</span>
-        </button>
-      </div>
+      <BottomNav />
     </div>
   );
 }
